@@ -12,19 +12,79 @@ from guita import __version__
 from guita.app.service import GuitaService
 from guita.cli import formatters
 from guita.domain.errors import GuitaError, ValidationError
+from guita.domain.money import looks_like_amount
 from guita.persistence.db import default_db_path
 
 _HELP_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-def _split_amounts_and_account(values: list[str]) -> tuple[list[str], str]:
-    """Last token is the account; preceding tokens are amounts to sum."""
+def _token_matches_known_account(token: str, known_accounts: list[str]) -> bool:
+    """True if token is an exact or unique abbreviation of a known account."""
+    folded = token.casefold()
+    if any(name.casefold() == folded for name in known_accounts):
+        return True
+    if len(folded) < 3:
+        return False
+    matches = [name for name in known_accounts if name.casefold().startswith(folded)]
+    return len(matches) == 1
+
+
+def _split_amounts_and_account(
+    values: list[str],
+    *,
+    known_accounts: list[str] | None = None,
+) -> tuple[list[str], str]:
+    """Split CLI tokens into amounts and one account name (order-independent)."""
     if len(values) < 2:
         raise ValidationError(
-            "Error: provide one or more amounts followed by an account name.\n"
-            "Example: guita + 42.5 297.5 upwork"
+            "Error: provide one or more amounts and an account name.\n"
+            "Examples: guita + 100 upwork\n"
+            "          guita + upwork 100\n"
+            "          guita + 42.5 297.5 upwork"
         )
-    return values[:-1], values[-1]
+
+    known = list(known_accounts or [])
+    matched = [
+        i for i, token in enumerate(values)
+        if _token_matches_known_account(token, known)
+    ]
+
+    if len(matched) > 1:
+        names = ", ".join(values[i] for i in matched)
+        raise ValidationError(
+            f"Error: multiple account names found in arguments: {names}.\n"
+            "Provide exactly one account name."
+        )
+
+    if len(matched) == 1:
+        account_index = matched[0]
+    else:
+        name_indexes = [i for i, token in enumerate(values) if not looks_like_amount(token)]
+        if len(name_indexes) == 1:
+            account_index = name_indexes[0]
+        elif len(name_indexes) == 0:
+            raise ValidationError(
+                "Error: missing account name.\n"
+                "Examples: guita + 100 upwork\n"
+                "          guita + upwork 100"
+            )
+        else:
+            names = ", ".join(values[i] for i in name_indexes)
+            raise ValidationError(
+                f"Error: could not determine the account name among: {names}.\n"
+                "Provide exactly one account name with one or more amounts."
+            )
+
+    account = values[account_index]
+    amounts = [values[i] for i in range(len(values)) if i != account_index]
+    if not amounts:
+        raise ValidationError(
+            "Error: provide at least one amount with the account name.\n"
+            "Examples: guita + 100 upwork\n"
+            "          guita + upwork 100"
+        )
+    return amounts, account
+
 
 app = typer.Typer(
     name="guita",
@@ -70,18 +130,16 @@ def balance() -> None:
         _fail(exc)
 
 
-@app.command("+")
-def add_money(
-    values: list[str] = typer.Argument(
-        ...,
-        help="One or more amounts, then the account name.",
-    ),
-    fee: Optional[str] = typer.Option(None, "--fee", help="Optional fee."),
+def _add_money_command(
+    values: list[str],
+    fee: Optional[str],
 ) -> None:
-    """Add money to an account. Multiple amounts are summed."""
     try:
-        amounts, account = _split_amounts_and_account(values)
         with _service() as svc:
+            known = [account.name for account in svc.list_accounts()]
+            amounts, account = _split_amounts_and_account(
+                values, known_accounts=known
+            )
             tx, parts = svc.add_money(amounts, account, fee=fee)
             acct = next(a.account for a in svc.balances() if a.account.id == tx.account_id)
             typer.echo(
@@ -93,24 +151,67 @@ def add_money(
         _fail(exc)
 
 
-@app.command("-")
-def remove_money(
-    values: list[str] = typer.Argument(
-        ...,
-        help="One or more amounts, then the account name.",
-    ),
-    fee: Optional[str] = typer.Option(None, "--fee", help="Optional fee."),
+def _remove_money_command(
+    values: list[str],
+    fee: Optional[str],
 ) -> None:
-    """Remove money from an account. Multiple amounts are summed."""
     try:
-        amounts, account = _split_amounts_and_account(values)
         with _service() as svc:
+            known = [account.name for account in svc.list_accounts()]
+            amounts, account = _split_amounts_and_account(
+                values, known_accounts=known
+            )
             tx, parts = svc.remove_money(amounts, account, fee=fee)
             acct = next(a.account for a in svc.balances() if a.account.id == tx.account_id)
             typer.echo(
                 formatters.format_remove_result(
                     acct, tx.amount, tx.fee, svc.account_balance(acct), parts=parts
                 )
+            )
+    except GuitaError as exc:
+        _fail(exc)
+
+
+@app.command("+")
+@app.command("add")
+def add_money(
+    values: list[str] = typer.Argument(
+        ...,
+        help="Account name and one or more amounts, in any order.",
+    ),
+    fee: Optional[str] = typer.Option(None, "--fee", help="Optional fee."),
+) -> None:
+    """Add money to an account. Multiple amounts are summed."""
+    _add_money_command(values, fee)
+
+
+@app.command("-")
+@app.command("remove")
+def remove_money(
+    values: list[str] = typer.Argument(
+        ...,
+        help="Account name and one or more amounts, in any order.",
+    ),
+    fee: Optional[str] = typer.Option(None, "--fee", help="Optional fee."),
+) -> None:
+    """Remove money from an account. Multiple amounts are summed."""
+    _remove_money_command(values, fee)
+
+
+@app.command("set")
+def set_balance(
+    account: str = typer.Argument(..., help="Account name."),
+    balance_value: str = typer.Argument(..., help="Target ledger balance."),
+) -> None:
+    """Set an account balance by recording a corrective addition or removal."""
+    try:
+        with _service() as svc:
+            acct, previous, target, tx = svc.set_balance(account, balance_value)
+            adjustment = None if tx is None else (
+                tx.amount if tx.type.value == "addition" else -tx.amount
+            )
+            typer.echo(
+                formatters.format_set_result(acct, previous, target, adjustment)
             )
     except GuitaError as exc:
         _fail(exc)
@@ -264,12 +365,38 @@ def info() -> None:
 def account_add(
     name: str = typer.Argument(..., help="Account name."),
     currency: str = typer.Argument("USD", help="Currency (USD only for now)."),
+    alias: Optional[str] = typer.Option(
+        None,
+        "--alias",
+        "-a",
+        help="Unique alias when the default 3-letter short code would overlap.",
+    ),
 ) -> None:
     """Create an account."""
     try:
         with _service() as svc:
-            account = svc.add_account(name, currency)
-            typer.echo(f"Created {account.name} — {account.currency}")
+            account = svc.add_account(name, currency, alias=alias)
+            if account.alias:
+                typer.echo(
+                    f"Created {account.name} — {account.currency} "
+                    f"(alias: {account.alias})"
+                )
+            else:
+                typer.echo(f"Created {account.name} — {account.currency}")
+    except GuitaError as exc:
+        _fail(exc)
+
+
+@account_app.command("alias")
+def account_set_alias(
+    name: str = typer.Argument(..., help="Account name or current reference."),
+    alias: str = typer.Argument(..., help="Unique alias (at least 3 characters)."),
+) -> None:
+    """Assign a unique alias used as a short reference for an account."""
+    try:
+        with _service() as svc:
+            account = svc.set_alias(name, alias)
+            typer.echo(f"Alias for {account.name}: {account.alias}")
     except GuitaError as exc:
         _fail(exc)
 

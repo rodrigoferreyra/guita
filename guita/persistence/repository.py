@@ -43,14 +43,19 @@ class Repository:
 
     # --- accounts ---
 
-    def create_account(self, name: str, currency: str = "USD") -> Account:
+    def create_account(
+        self,
+        name: str,
+        currency: str = "USD",
+        alias: str | None = None,
+    ) -> Account:
         created_at = _utcnow()
         cur = self._conn.execute(
             """
-            INSERT INTO accounts (name, currency, created_at, active)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO accounts (name, currency, created_at, active, alias)
+            VALUES (?, ?, ?, 1, ?)
             """,
-            (name, currency, _dt_to_str(created_at)),
+            (name, currency, _dt_to_str(created_at), alias),
         )
         self._conn.commit()
         return Account(
@@ -59,6 +64,7 @@ class Repository:
             currency=currency,
             created_at=created_at,
             active=True,
+            alias=alias,
         )
 
     def list_accounts(self, *, active_only: bool = False) -> list[Account]:
@@ -79,6 +85,13 @@ class Repository:
         ).fetchone()
         return self._account_from_row(row) if row else None
 
+    def get_account_by_alias(self, alias: str) -> Account | None:
+        row = self._conn.execute(
+            "SELECT * FROM accounts WHERE alias IS NOT NULL AND lower(alias) = lower(?)",
+            (alias,),
+        ).fetchone()
+        return self._account_from_row(row) if row else None
+
     def get_account(self, account_id: int) -> Account | None:
         row = self._conn.execute(
             "SELECT * FROM accounts WHERE id = ?",
@@ -90,6 +103,13 @@ class Repository:
         self._conn.execute(
             "UPDATE accounts SET active = ? WHERE id = ?",
             (1 if active else 0, account_id),
+        )
+        self._conn.commit()
+
+    def set_account_alias(self, account_id: int, alias: str | None) -> None:
+        self._conn.execute(
+            "UPDATE accounts SET alias = ? WHERE id = ?",
+            (alias, account_id),
         )
         self._conn.commit()
 
@@ -302,12 +322,14 @@ class Repository:
 
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> Account:
+        alias = row["alias"] if "alias" in row.keys() else None
         return Account(
             id=int(row["id"]),
             name=str(row["name"]),
             currency=str(row["currency"]),
             created_at=_str_to_dt(str(row["created_at"])),
             active=bool(row["active"]),
+            alias=str(alias) if alias is not None else None,
         )
 
     @staticmethod

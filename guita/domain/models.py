@@ -22,6 +22,7 @@ class Account:
     currency: str
     created_at: datetime
     active: bool
+    alias: str | None = None
 
 
 @dataclass(frozen=True)

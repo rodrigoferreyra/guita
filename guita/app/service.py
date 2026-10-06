@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from guita.domain.accounts import (
+    default_short_code,
+    effective_short_code,
+    matches_account_query,
+    validate_alias_format,
+)
 from guita.domain.errors import (
     ConflictError,
     InsufficientBalanceError,
@@ -69,7 +75,12 @@ class GuitaService:
 
     # --- accounts ---
 
-    def add_account(self, name: str, currency: str = SUPPORTED_CURRENCY) -> Account:
+    def add_account(
+        self,
+        name: str,
+        currency: str = SUPPORTED_CURRENCY,
+        alias: str | None = None,
+    ) -> Account:
         cleaned = name.strip()
         if not cleaned:
             raise ValidationError("Error: account name must not be empty.")
@@ -84,7 +95,40 @@ class GuitaService:
             raise ConflictError(
                 f'Error: account "{existing.name}" already exists.'
             )
-        return self._repo.create_account(cleaned, currency)
+
+        cleaned_alias: str | None = None
+        if alias is not None:
+            try:
+                cleaned_alias = validate_alias_format(alias)
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+            self._ensure_alias_available(cleaned_alias)
+        else:
+            new_code = default_short_code(cleaned)
+            if new_code is not None:
+                conflict = self._account_claiming_code(new_code)
+                if conflict is not None:
+                    raise ConflictError(
+                        f'Error: account "{cleaned}" shares the short code '
+                        f'"{new_code}" with existing account "{conflict.name}".\n'
+                        "Short-code overlap is rejected.\n"
+                        "Assign a unique alias instead, for example:\n"
+                        f"  guita account add {cleaned} --alias <unique-code>"
+                    )
+
+        return self._repo.create_account(cleaned, currency, alias=cleaned_alias)
+
+    def set_alias(self, account_name: str, alias: str) -> Account:
+        account = self._require_account(account_name)
+        try:
+            cleaned_alias = validate_alias_format(alias)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        self._ensure_alias_available(cleaned_alias, excluding_id=account.id)
+        self._repo.set_account_alias(account.id, cleaned_alias)
+        updated = self._repo.get_account(account.id)
+        assert updated is not None
+        return updated
 
     def list_accounts(self) -> list[Account]:
         return self._repo.list_accounts()
@@ -176,6 +220,45 @@ class GuitaService:
             fee=fee_value,
         )
         return tx, parts
+
+    def set_balance(
+        self,
+        account_name: str,
+        target: str | Decimal,
+    ) -> tuple[Account, Decimal, Decimal, Transaction | None]:
+        """Set an account ledger balance by appending a corrective transaction.
+
+        Returns (account, previous_balance, target_balance, transaction_or_none).
+        """
+        account = self._require_active_account(account_name)
+        target_balance = parse_money(target, field="balance")
+        if target_balance < ZERO:
+            raise ValidationError(
+                "Error: balance must be greater than or equal to zero."
+            )
+
+        previous = self.account_balance(account)
+        delta = target_balance - previous
+        if delta == ZERO:
+            return account, previous, target_balance, None
+
+        if delta > ZERO:
+            tx = self._repo.add_transaction(
+                type=TransactionType.ADDITION,
+                account_id=account.id,
+                amount=delta,
+                fee=ZERO,
+                description="set",
+            )
+        else:
+            tx = self._repo.add_transaction(
+                type=TransactionType.REMOVAL,
+                account_id=account.id,
+                amount=-delta,
+                fee=ZERO,
+                description="set",
+            )
+        return account, previous, target_balance, tx
 
     def transfer(
         self,
@@ -450,14 +533,82 @@ class GuitaService:
     # --- helpers ---
 
     def _require_account(self, name: str) -> Account:
-        account = self._repo.get_account_by_name(name)
-        if account is None:
-            available = ", ".join(a.name for a in self._repo.list_accounts()) or "(none)"
+        return self.resolve_account(name)
+
+    def resolve_account(self, query: str) -> Account:
+        """Resolve a full account name, alias, or unique abbreviation (min 3 letters)."""
+        cleaned = query.strip()
+        if not cleaned:
+            raise ValidationError("Error: account name must not be empty.")
+
+        accounts = self._repo.list_accounts()
+        available = ", ".join(a.name for a in accounts) or "(none)"
+
+        exact_name = [a for a in accounts if a.name.casefold() == cleaned.casefold()]
+        if exact_name:
+            return exact_name[0]
+
+        exact_alias = [
+            a for a in accounts
+            if a.alias is not None and a.alias.casefold() == cleaned.casefold()
+        ]
+        if exact_alias:
+            return exact_alias[0]
+
+        if len(cleaned) < 3:
             raise NotFoundError(
-                f'Error: account "{name}" does not exist.\n'
-                f"Available accounts: {available}"
+                f'Error: account "{query}" does not exist.\n'
+                f"Available accounts: {available}\n"
+                "Abbreviations must be at least 3 letters "
+                f'(for example "wis" for Wise).'
             )
-        return account
+
+        matches = [a for a in accounts if matches_account_query(a, cleaned)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            names = ", ".join(a.name for a in matches)
+            raise ConflictError(
+                f'Error: account abbreviation "{query}" is ambiguous.\n'
+                f"Matches: {names}\n"
+                "Use a unique alias, a longer prefix, or the full account name.\n"
+                "Assign an alias with: guita account alias <account> <alias>"
+            )
+
+        short_hints = []
+        for account in accounts:
+            code = effective_short_code(account)
+            if code:
+                label = "alias" if account.alias else "short"
+                short_hints.append(f"{account.name} ({label}: {code})")
+        hint = ", ".join(short_hints) if short_hints else available
+        raise NotFoundError(
+            f'Error: account "{query}" does not exist.\n'
+            f"Available accounts: {hint}"
+        )
+
+    def _account_claiming_code(self, code: str, *, excluding_id: int | None = None) -> Account | None:
+        target = code.casefold()
+        for account in self._repo.list_accounts():
+            if excluding_id is not None and account.id == excluding_id:
+                continue
+            claimed = effective_short_code(account)
+            if claimed == target:
+                return account
+            if account.alias and account.alias.casefold() == target:
+                return account
+            if account.name.casefold() == target:
+                return account
+        return None
+
+    def _ensure_alias_available(self, alias: str, *, excluding_id: int | None = None) -> None:
+        conflict = self._account_claiming_code(alias, excluding_id=excluding_id)
+        if conflict is not None:
+            raise ConflictError(
+                f'Error: alias "{alias}" overlaps with account "{conflict.name}".\n'
+                "Choose a different alias that does not collide with another "
+                "name, short code, or alias."
+            )
 
     def _require_active_account(self, name: str) -> Account:
         account = self._require_account(name)

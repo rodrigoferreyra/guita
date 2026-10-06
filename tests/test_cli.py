@@ -45,6 +45,10 @@ def test_info_and_core_flow(tmp_path: Path, monkeypatch) -> None:
     comma = runner.invoke(app, ["+", "10,5", "wise"])
     assert comma.exit_code == 0
     assert "10.50" in comma.stdout
+    # Account-first order and add/remove aliases
+    assert runner.invoke(app, ["add", "wise", "25"]).exit_code == 0
+    assert runner.invoke(app, ["remove", "10", "wise"]).exit_code == 0
+    assert runner.invoke(app, ["-", "wise", "5"]).exit_code == 0
     assert runner.invoke(app, ["-", "80", "Wise", "--fee", "2"]).exit_code == 0
     transfer = runner.invoke(app, ["transfer", "500", "wise", "wallbit", "--fee", "5"])
     assert transfer.exit_code == 0
@@ -67,3 +71,9 @@ def test_info_and_core_flow(tmp_path: Path, monkeypatch) -> None:
     bad = runner.invoke(app, ["+", "10", "nope"])
     assert bad.exit_code == 1
     assert "does not exist" in bad.stderr
+
+    assert runner.invoke(app, ["account", "add", "Upwork", "USD"]).exit_code == 0
+    set_cmd = runner.invoke(app, ["set", "upwork", "1000"])
+    assert set_cmd.exit_code == 0
+    assert "1,000.00" in set_cmd.stdout
+    assert "set to" in set_cmd.stdout.lower() or "Set" in set_cmd.stdout or "set to" in set_cmd.stdout

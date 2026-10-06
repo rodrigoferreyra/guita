@@ -9,6 +9,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from guita.app.service import PeriodStats
 from guita.cli.charts import render_xy_chart
+from guita.domain.accounts import effective_short_code
 from guita.domain.money import ZERO, format_money
 from guita.domain.models import Account, AccountBalance, Transaction, TransactionType
 
@@ -98,7 +99,14 @@ def format_accounts(accounts: list[Account]) -> str:
     lines = []
     for account in accounts:
         status = "active" if account.active else "inactive"
-        lines.append(f"{account.name} — {account.currency} ({status})")
+        code = effective_short_code(account)
+        if account.alias:
+            short = f", alias: {account.alias}"
+        elif code:
+            short = f", short: {code}"
+        else:
+            short = ""
+        lines.append(f"{account.name} — {account.currency} ({status}{short})")
     return "\n".join(lines)
 
 
@@ -282,6 +290,22 @@ def format_remove_result(
         lines.append(f"Fee: {display_money(-fee, signed=True)}")
         lines.append(f"Net: {display_money(-(amount + fee), signed=True)}")
     lines.append(f"Balance: {display_money(new_balance)}")
+    return "\n".join(lines)
+
+
+def format_set_result(
+    account: Account,
+    previous: Decimal,
+    target: Decimal,
+    adjustment: Decimal | None,
+) -> str:
+    lines = [f"{account.name}: set to {display_money(target)}"]
+    if adjustment is None or adjustment == ZERO:
+        lines.append(f"Previous: {display_money(previous)} (unchanged)")
+    else:
+        lines.append(f"Previous: {display_money(previous)}")
+        lines.append(f"Adjustment: {display_money(adjustment, signed=True)}")
+    lines.append(f"Balance: {display_money(target)}")
     return "\n".join(lines)
 
 

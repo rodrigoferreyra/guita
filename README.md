@@ -15,6 +15,10 @@ Guita treats savings as money held in named **accounts**. You record movements y
 
 Each **account** has a name and a currency. In the current version, currency is **USD** only. Account names are matched case-insensitively and stored with the capitalization you enter.
 
+You can refer to an account by its full name or by a unique abbreviation of at least three letters. The default short code is the first three letters of the name—for example, *wis* for **Wise**.
+
+If a new account would reuse another account’s default short code, Guita **rejects** the create. Assign a unique **alias** instead with **`--alias`**, then use that alias in commands.
+
 A **transaction** is one of:
 
 - **Addition** (`+`): money added to savings in an account
@@ -30,6 +34,7 @@ Corrections stay append-only. To fix a mistake, record another transaction rathe
 ## Key features
 
 - Record additions, removals, and transfers from the terminal
+- Set an account balance to an exact value with a corrective ledger entry
 - Attach optional fees that reduce total savings
 - Sum several amounts in one `+` or `-` command
 - Accept `.` or `,` as the decimal separator on input
@@ -97,12 +102,39 @@ guita account add Binance
 guita account add Cash
 ```
 
+If a name would reuse another account’s first three letters, the create is rejected. Assign a unique alias:
+
+```bash
+guita account add Wisdom --alias wdm
+```
+
+You can also assign or change an alias later:
+
+```bash
+guita account alias Wisdom wdm
+```
+
 ### List accounts
 
-Run **`guita account list`** to show each account, its currency, and whether it is active or inactive.
+Run **`guita account list`** to show each account, its currency, status, and short code or alias.
 
 ```bash
 guita account list
+```
+
+Example lines:
+
+```text
+Wise — USD (active, short: wis)
+Wisdom — USD (active, alias: wdm)
+```
+
+Use those references in commands:
+
+```bash
+guita + 10 wis
+guita + 10 wdm
+guita transfer 50 wis wal
 ```
 
 ### Deactivate an account
@@ -119,24 +151,28 @@ Amounts must be positive. The command chooses the direction. Values use at most 
 
 ### Add money
 
-Run **`guita +`** with one or more amounts, then the account name. Multiple amounts are summed into one addition.
+Run **`guita +`** or **`guita add`** with one or more amounts and an account name. Argument order does not matter. Multiple amounts are summed into one addition.
 
 ```bash
 guita + 80 wise
+guita + wise 80
+guita add 100 upwork
+guita add upwork 100
 guita + 42.5 297.5 upwork
-guita + 42,5 297,5 upwork
+guita + upwork 42,5 297,5
 guita + 100 wise --fee 2
 guita + 100 wise --fee 2,5
 ```
 
 ### Remove money
 
-Run **`guita -`** with one or more amounts, then the account name. Multiple amounts are summed into one removal.
+Run **`guita -`** or **`guita remove`** with one or more amounts and an account name. Argument order does not matter. Multiple amounts are summed into one removal.
 
 ```bash
 guita - 80 wise
-guita - 20 15.5 wise
-guita - 20 15,5 wise
+guita - wise 80
+guita remove 20 wise
+guita remove wise 20 15,5
 guita - 100 wise --fee 2
 ```
 
@@ -151,6 +187,21 @@ guita transfer 500,50 wise wallbit --fee 2,5
 ```
 
 A transfer without a fee does not change total savings. A transfer with a fee reduces total savings by the fee amount.
+
+### Set an account balance
+
+Run **`guita set`** with the account name and the target balance. Guita appends a corrective addition or removal so the ledger balance becomes that value. History is preserved.
+
+1. Choose the account to adjust.
+2. Enter the target balance.
+3. Confirm the printed previous balance, adjustment, and new balance.
+
+```bash
+guita set upwork 1000
+guita set upwork 1000,50
+```
+
+**Note:** **`guita set`** changes the ledger. **`guita snapshot`** only records an observed balance for comparison and does not change the ledger.
 
 ## Review history and statistics
 
@@ -243,7 +294,7 @@ guita account -h
 
 | Concept | Meaning |
 |---------|---------|
-| **Account** | A named place where money is held. Names are case-insensitive. |
+| **Account** | A named place where money is held. Names are case-insensitive. Abbreviations of 3+ letters are allowed when unique. |
 | **Addition** | Money added to an account (`guita +`). |
 | **Removal** | Money removed from an account (`guita -`). |
 | **Transfer** | Money moved from sender to recipient. Does not change total savings unless a fee is present. |
@@ -285,9 +336,10 @@ When both separators appear in one number, the **last** separator is the decimal
 | Command | Purpose |
 |---------|---------|
 | `guita` / `guita balance` | Show account balances and total |
-| `guita +` *amounts…* *account* `[--fee` *amount*`]` | Add money (sum multiple amounts) |
-| `guita -` *amounts…* *account* `[--fee` *amount*`]` | Remove money (sum multiple amounts) |
+| `guita +` / `guita add` *…* | Add money (amounts and account in any order) |
+| `guita -` / `guita remove` *…* | Remove money (amounts and account in any order) |
 | `guita transfer` *amount* *source* *destination* `[--fee` *amount*`]` | Transfer from sender to recipient |
+| `guita set` *account* *balance* | Set ledger balance via corrective transaction |
 | `guita history` | Show history; optional filters and `--balances` |
 | `guita snapshot` *account* *balance* | Record an observed balance |
 | `guita stats` | Show month and all-time stats with graphs |
@@ -295,7 +347,8 @@ When both separators appear in one number, the **last** separator is the decimal
 | `guita export` [*path*] | Export ledger to CSV or JSON |
 | `guita backup` [*path*] | Copy the database file |
 | `guita info` | Show version and database path |
-| `guita account add` *name* [*currency*] | Create an account |
+| `guita account add` *name* [*currency*] `[--alias` *alias*`]` | Create an account |
+| `guita account alias` *account* *alias* | Assign a unique short alias |
 | `guita account list` | List accounts |
 | `guita account deactivate` *name* | Deactivate an account |
 

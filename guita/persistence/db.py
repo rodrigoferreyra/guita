@@ -13,11 +13,16 @@ CREATE TABLE IF NOT EXISTS accounts (
     name TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'USD',
     created_at TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    alias TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_name_lower
     ON accounts (lower(name));
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_alias_lower
+    ON accounts (lower(alias))
+    WHERE alias IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,4 +89,21 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
 
 def initialize_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate_accounts_alias(conn)
     conn.commit()
+
+
+def _migrate_accounts_alias(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
+    }
+    if "alias" not in columns:
+        conn.execute("ALTER TABLE accounts ADD COLUMN alias TEXT")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_alias_lower
+            ON accounts (lower(alias))
+            WHERE alias IS NOT NULL
+        """
+    )

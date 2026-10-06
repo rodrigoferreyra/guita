@@ -81,6 +81,15 @@ def parse_positive_amount(value: str | Decimal, *, field: str = "amount") -> Dec
     return amount
 
 
+def looks_like_amount(value: str) -> bool:
+    """Return True if *value* can be parsed as a monetary number."""
+    try:
+        parse_money(value)
+        return True
+    except ValidationError:
+        return False
+
+
 def sum_positive_amounts(
     values: list[str | Decimal] | str | Decimal,
     *,
