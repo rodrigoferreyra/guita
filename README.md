@@ -1,8 +1,6 @@
 # Guita
 
-**Guita** is a local command-line application for manually tracking personal savings. Use this page to learn what Guita records, how money moves between **accounts**, and how to install and operate the `guita` command.
-
-Guita stores an auditable **ledger** of additions, removals, transfers, and fees. It shows current balances, history, and how total savings change over time. It is not a budgeting tool, expense categorizer, bank aggregator, or investment tracker.
+**Guita** is a CLI application for manually tracking personal savings. Guita stores an auditable **ledger** of additions, removals, transfers, and fees. It shows current balances, history, and how total savings change over time. It is not a budgeting tool, expense categorizer, bank aggregator, or investment tracker.
 
 ```bash
 guita + 80 wise
