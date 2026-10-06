@@ -314,18 +314,3 @@ Example:
 ```bash
 guita account deactivate Upwork
 ```
-
-## Corrections
-
-Guita does not delete or rewrite history. To fix a mistake, record a corrective transaction (for example, remove the excess amount). The original entry stays in the ledger.
-
-## Development
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-```
-
-Product requirements live in [`.cursor/docs/srs.md`](.cursor/docs/srs.md).
