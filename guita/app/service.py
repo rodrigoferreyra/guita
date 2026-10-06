@@ -254,21 +254,20 @@ class GuitaService:
             return []
 
         running = ZERO
-        points: list[tuple[datetime, Decimal, Decimal | None]] = []
-        # Group by calendar date (UTC date portion)
+        # Group by local calendar date so charts match the user's day.
         by_date: dict[str, Decimal] = {}
         for tx in txs:
             running += transaction_delta(tx)
-            day = tx.timestamp.astimezone(timezone.utc).date().isoformat()
+            day = tx.timestamp.astimezone().date().isoformat()
             by_date[day] = running
 
         previous: Decimal | None = None
+        points: list[tuple[datetime, Decimal, Decimal | None]] = []
         for day in sorted(by_date):
             total = by_date[day]
             change = None if previous is None else total - previous
-            points.append(
-                (datetime.fromisoformat(day).replace(tzinfo=timezone.utc), total, change)
-            )
+            # Naive datetime representing a calendar day (not a UTC instant).
+            points.append((datetime.fromisoformat(day), total, change))
             previous = total
         return points
 

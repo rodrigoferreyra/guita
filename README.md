@@ -179,7 +179,7 @@ guita snapshot wise 1820,50
 
 ### Show statistics
 
-Run **`guita stats`** to see this month’s figures, all-time figures since the first transaction, bar graphs for the period breakdown, and a savings-over-time chart.
+Run **`guita stats`** to see this month’s figures, all-time figures since the first transaction, breakdown bars, and two-axis charts for **total savings** and **daily change** over time.
 
 ```bash
 guita stats

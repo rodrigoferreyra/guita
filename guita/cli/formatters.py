@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from guita.app.service import PeriodStats
+from guita.cli.charts import render_xy_chart
 from guita.domain.money import ZERO, format_money
 from guita.domain.models import Account, AccountBalance, Transaction, TransactionType
 
@@ -52,6 +53,9 @@ def display_money(
 
 
 def _local_day(value: datetime) -> str:
+    # Date-only chart points are naive calendar days; leave them unshifted.
+    if value.tzinfo is None:
+        return value.strftime("%b %d")
     return value.astimezone().strftime("%b %d")
 
 
@@ -166,24 +170,36 @@ def _format_period_block(stats: PeriodStats, *, title: str) -> list[str]:
     return lines
 
 
-def _format_savings_graph(
+def _format_savings_graphs(
     points: list[tuple[object, Decimal, Decimal | None]],
-    *,
-    width: int = 24,
 ) -> list[str]:
     if not points:
-        return ["Savings over time", "  (no transactions yet)"]
+        return [
+            "Progression over time",
+            "",
+            *render_xy_chart([], title="Total savings"),
+            "",
+            *render_xy_chart([], title="Daily change"),
+        ]
 
-    # Keep the chart readable: last 12 points
-    sample = points[-12:]
-    max_total = max((total for _, total, _ in sample), default=ZERO)
-    lines = ["Savings over time"]
-    for when, total, _ in sample:
-        day = _local_day(when)  # type: ignore[arg-type]
-        lines.append(
-            f"  {day:<8} {display_money(total, width=12)}  {_bar(total, max_total, width=width)}"
-        )
-    return lines
+    # Keep recent history readable on a terminal.
+    sample = points[-30:]
+    totals = [
+        (_local_day(when), total)  # type: ignore[arg-type]
+        for when, total, _ in sample
+    ]
+    changes = [
+        (_local_day(when), change if change is not None else ZERO)  # type: ignore[arg-type]
+        for when, _, change in sample
+    ]
+
+    return [
+        "Progression over time",
+        "",
+        *render_xy_chart(totals, title="Total savings"),
+        "",
+        *render_xy_chart(changes, title="Daily change"),
+    ]
 
 
 def format_stats(
@@ -198,7 +214,7 @@ def format_stats(
         "",
         *_format_period_block(all_time, title="All time"),
         "",
-        *_format_savings_graph(balance_points or []),
+        *_format_savings_graphs(balance_points or []),
     ]
     return "\n".join(lines)
 
