@@ -1,0 +1,1 @@
+"""Domain layer: financial rules and models."""
