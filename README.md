@@ -316,5 +316,3 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
-
-Product requirements are defined in the [software requirements specification](.cursor/docs/srs.md). Documentation writing conventions are defined in the [software product documentation style guide](docs/style-guide.md).
