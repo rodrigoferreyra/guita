@@ -20,10 +20,6 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_name_lower
     ON accounts (lower(name));
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_alias_lower
-    ON accounts (lower(alias))
-    WHERE alias IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
